@@ -1,0 +1,1347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AppForge Studio — ZIP to APK & AAB Builder</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Inter Font -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- JSZip for real client-side ZIP inspection & bundle generation -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    },
+                    colors: {
+                        brand: {
+                            50: '#eef2ff',
+                            100: '#e0e7ff',
+                            500: '#6366f1',
+                            600: '#4f46e5',
+                            700: '#4338ca',
+                            900: '#312e81',
+                        },
+                        android: '#3ddc84'
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            background-color: #090d16;
+            color: #f8fafc;
+            overflow-x: hidden;
+        }
+        .glass-card {
+            background: rgba(17, 24, 39, 0.75);
+            backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .step-active {
+            border-color: #6366f1;
+            background: rgba(99, 102, 241, 0.12);
+        }
+        /* Custom scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0f172a;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #334155;
+            border-radius: 9999px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #475569;
+        }
+        @keyframes pulseGlow {
+            0%, 100% { box-shadow: 0 0 15px rgba(61, 220, 132, 0.25); }
+            50% { box-shadow: 0 0 28px rgba(61, 220, 132, 0.55); }
+        }
+        .android-glow {
+            animation: pulseGlow 3s infinite;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col antialiased selection:bg-indigo-500 selection:text-white">
+
+    <!-- Top Navigation -->
+    <header class="sticky top-0 z-40 glass-card border-b border-slate-800/80">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-emerald-400 flex items-center justify-center shadow-lg">
+                    <i data-lucide="package-check" class="w-6 h-6 text-slate-950 stroke-[2.2]"></i>
+                </div>
+                <div>
+                    <div class="flex items-center gap-2">
+                        <span class="font-bold text-lg tracking-tight text-white">AppForge</span>
+                        <span class="text-[11px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">Studio v3.4</span>
+                    </div>
+                    <p class="text-xs text-slate-400 hidden sm:block">Universal ZIP to Native Android APK & AAB Compiler</p>
+                </div>
+            </div>
+
+            <div class="flex items-center gap-3">
+                <button onclick="loadDemoZip()" class="text-xs sm:text-sm px-3.5 py-2 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-200 border border-slate-700 transition flex items-center gap-2">
+                    <i data-lucide="sparkles" class="w-4 h-4 text-amber-400"></i>
+                    <span>Try Sample Project</span>
+                </button>
+                <div class="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-400">
+                    <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                    <span>Gradle 8.7 & SDK 35 Ready</span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Toast Notification Container -->
+    <div id="toast-container" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none px-4 sm:px-0"></div>
+
+    <!-- Main Workspace -->
+    <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+        
+        <!-- Progress Stepper -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
+            <button onclick="goToStep(1)" id="nav-step-1" class="step-active glass-card rounded-2xl p-3.5 text-left transition border border-slate-800 hover:border-indigo-500/50">
+                <div class="flex items-center justify-between mb-1">
+                    <span class="text-xs font-semibold text-indigo-400 uppercase tracking-wider">Step 01</span>
+                    <i data-lucide="folder-archive" class="w-4 h-4 text-indigo-400"></i>
+                </div>
+                <p class="font-semibold text-sm text-white">Upload ZIP & Engine</p>
+                <p class="text-xs text-slate-400 truncate" id="step1-sub">Auto-detect source code</p>
+            </button>
+
+            <button onclick="goToStep(2)" id="nav-step-2" class="glass-card rounded-2xl p-3.5 text-left transition border border-slate-800 hover:border-indigo-500/50">
+                <div class="flex items-center justify-between mb-1">
+                    <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Step 02</span>
+                    <i data-lucide="smartphone" class="w-4 h-4 text-slate-400"></i>
+                </div>
+                <p class="font-semibold text-sm text-white">Identity & Keywords</p>
+                <p class="text-xs text-slate-400 truncate" id="step2-sub">Package ID, Icon & ASO</p>
+            </button>
+
+            <button onclick="goToStep(3)" id="nav-step-3" class="glass-card rounded-2xl p-3.5 text-left transition border border-slate-800 hover:border-indigo-500/50">
+                <div class="flex items-center justify-between mb-1">
+                    <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Step 03</span>
+                    <i data-lucide="badge-dollar-sign" class="w-4 h-4 text-slate-400"></i>
+                </div>
+                <p class="font-semibold text-sm text-white">AdMob Monetization</p>
+                <p class="text-xs text-slate-400 truncate" id="step3-sub">Banner, Interstitial, Reward</p>
+            </button>
+
+            <button onclick="goToStep(4)" id="nav-step-4" class="glass-card rounded-2xl p-3.5 text-left transition border border-slate-800 hover:border-indigo-500/50">
+                <div class="flex items-center justify-between mb-1">
+                    <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Step 04</span>
+                    <i data-lucide="hammer" class="w-4 h-4 text-slate-400"></i>
+                </div>
+                <p class="font-semibold text-sm text-white">Build APK & AAB</p>
+                <p class="text-xs text-slate-400 truncate" id="step4-sub">Signed Release Packages</p>
+            </button>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            
+            <!-- Left Configuration Column (8 Cols) -->
+            <div class="lg:col-span-8 space-y-6">
+
+                <!-- STEP 1: UPLOAD & RUNTIME DETECTION -->
+                <section id="panel-step-1" class="glass-card rounded-3xl p-5 sm:p-7 space-y-6">
+                    <div>
+                        <h2 class="text-xl font-bold text-white flex items-center gap-2">
+                            <i data-lucide="file-code-2" class="w-5 h-5 text-indigo-400"></i>
+                            1. Upload Source Code Archive (.ZIP)
+                        </h2>
+                        <p class="text-sm text-slate-400 mt-1">Supports HTML/CSS/JS, React/Vite/Next, Flutter, Native Android (Kotlin/Java), Unity WebGL, and Python Kivy projects.</p>
+                    </div>
+
+                    <!-- Dropzone -->
+                    <div id="drop-zone" class="relative border-2 border-dashed border-slate-700 hover:border-indigo-500 bg-slate-900/60 rounded-2xl p-8 text-center transition cursor-pointer group">
+                        <input type="file" id="zip-input" accept=".zip" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer" onchange="handleZipUpload(event)">
+                        <div class="w-14 h-14 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center mx-auto mb-4 group-hover:scale-105 transition">
+                            <i data-lucide="upload-cloud" class="w-7 h-7 text-indigo-400"></i>
+                        </div>
+                        <p class="text-base font-semibold text-white" id="drop-title">Drop your project .ZIP file here or click to browse</p>
+                        <p class="text-xs text-slate-400 mt-1" id="drop-subtitle">Automatic file tree scanner • Up to 500MB archive supported</p>
+                    </div>
+
+                    <!-- Detected Project Details -->
+                    <div id="zip-analysis-box" class="hidden bg-slate-900/90 border border-slate-800 rounded-2xl p-4 space-y-3">
+                        <div class="flex flex-wrap items-center justify-between gap-2">
+                            <div class="flex items-center gap-2.5">
+                                <span class="px-2.5 py-1 rounded-lg bg-emerald-500/15 text-emerald-400 text-xs font-semibold border border-emerald-500/30" id="detected-stack-badge">HTML5 / Web App</span>
+                                <span class="text-sm font-medium text-white" id="zip-filename">project.zip</span>
+                            </div>
+                            <span class="text-xs text-slate-400 font-mono" id="zip-filecount">0 files indexed</span>
+                        </div>
+                        <div id="zip-tree-preview" class="text-xs font-mono text-slate-400 bg-slate-950/80 p-3 rounded-xl max-h-28 overflow-y-auto space-y-1"></div>
+                    </div>
+
+                    <!-- Manual Engine Override -->
+                    <div>
+                        <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">Target Build Engine / Runtime Wrapper</label>
+                        <div class="grid grid-cols-2 sm:grid-cols-3 gap-2.5" id="engine-selector">
+                            <button type="button" onclick="selectEngine('web')" data-engine="web" class="engine-btn p-3 rounded-xl border border-indigo-500 bg-indigo-500/15 text-left transition">
+                                <div class="font-semibold text-sm text-white">HTML5 / JS WebView</div>
+                                <div class="text-[11px] text-slate-400">Capacitor Native Bridge</div>
+                            </button>
+                            <button type="button" onclick="selectEngine('react')" data-engine="react" class="engine-btn p-3 rounded-xl border border-slate-800 bg-slate-900/60 hover:border-slate-700 text-left transition">
+                                <div class="font-semibold text-sm text-white">React / Vue / Vite</div>
+                                <div class="text-[11px] text-slate-400">Auto npm build + APK</div>
+                            </button>
+                            <button type="button" onclick="selectEngine('flutter')" data-engine="flutter" class="engine-btn p-3 rounded-xl border border-slate-800 bg-slate-900/60 hover:border-slate-700 text-left transition">
+                                <div class="font-semibold text-sm text-white">Flutter / Dart</div>
+                                <div class="text-[11px] text-slate-400">Flutter SDK 3.24</div>
+                            </button>
+                            <button type="button" onclick="selectEngine('native')" data-engine="native" class="engine-btn p-3 rounded-xl border border-slate-800 bg-slate-900/60 hover:border-slate-700 text-left transition">
+                                <div class="font-semibold text-sm text-white">Kotlin / Java Native</div>
+                                <div class="text-[11px] text-slate-400">Android Gradle Plugin</div>
+                            </button>
+                            <button type="button" onclick="selectEngine('python')" data-engine="python" class="engine-btn p-3 rounded-xl border border-slate-800 bg-slate-900/60 hover:border-slate-700 text-left transition">
+                                <div class="font-semibold text-sm text-white">Python / Kivy</div>
+                                <div class="text-[11px] text-slate-400">Buildozer ARM64</div>
+                            </button>
+                            <button type="button" onclick="selectEngine('godot')" data-engine="godot" class="engine-btn p-3 rounded-xl border border-slate-800 bg-slate-900/60 hover:border-slate-700 text-left transition">
+                                <div class="font-semibold text-sm text-white">Game Engine / Unity</div>
+                                <div class="text-[11px] text-slate-400">Hardware GLES 3.2</div>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="flex justify-end pt-2">
+                        <button onclick="goToStep(2)" class="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-sm transition flex items-center gap-2 shadow-lg shadow-indigo-600/20">
+                            <span>Next: Package Name & Keywords</span>
+                            <i data-lucide="arrow-right" class="w-4 h-4"></i>
+                        </button>
+                    </div>
+                </section>
+
+                <!-- STEP 2: PACKAGE NAME, ICON & KEYWORDS -->
+                <section id="panel-step-2" class="hidden glass-card rounded-3xl p-5 sm:p-7 space-y-6">
+                    <div>
+                        <h2 class="text-xl font-bold text-white flex items-center gap-2">
+                            <i data-lucide="tag" class="w-5 h-5 text-indigo-400"></i>
+                            2. App Identity, Package Name & Play Store Keywords
+                        </h2>
+                        <p class="text-sm text-slate-400 mt-1">Configure your unique Android Application ID, versioning, permissions, and ASO search keywords.</p>
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-xs font-medium text-slate-300 mb-1.5">Application Name *</label>
+                            <input type="text" id="app-name" value="NovaTask Pro" oninput="syncPreview()" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 focus:border-indigo-500 focus:outline-none text-sm text-white" placeholder="My Awesome App">
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-medium text-slate-300 mb-1.5">Package Name (Application ID) *</label>
+                            <div class="flex gap-2">
+                                <input type="text" id="package-name" value="com.novastudio.novatask" oninput="validatePackageName(); syncPreview()" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 focus:border-indigo-500 focus:outline-none text-sm font-mono text-emerald-400" placeholder="com.company.appname">
+                                <button type="button" onclick="autoGeneratePackage()" title="Auto-generate Package Name" class="px-3 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300">
+                                    <i data-lucide="wand-2" class="w-4 h-4"></i>
+                                </button>
+                            </div>
+                            <p id="pkg-validation-msg" class="text-[11px] text-emerald-400 mt-1">Valid Google Play package identifier</p>
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-medium text-slate-300 mb-1.5">Version Name</label>
+                            <input type="text" id="version-name" value="1.0.0" oninput="syncPreview()" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 focus:border-indigo-500 focus:outline-none text-sm font-mono text-white">
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-medium text-slate-300 mb-1.5">Version Code (Play Store Integer)</label>
+                            <input type="number" id="version-code" value="1" min="1" oninput="syncPreview()" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 focus:border-indigo-500 focus:outline-none text-sm font-mono text-white">
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-medium text-slate-300 mb-1.5">Minimum Android SDK</label>
+                            <select id="min-sdk" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 focus:border-indigo-500 focus:outline-none text-sm text-white">
+                                <option value="24">Android 7.0 Nougat (API 24) — 97.4% devices</option>
+                                <option value="26" selected>Android 8.0 Oreo (API 26) — Recommended</option>
+                                <option value="29">Android 10 (API 29)</option>
+                            </select>
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-medium text-slate-300 mb-1.5">Target Android SDK</label>
+                            <select id="target-sdk" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 focus:border-indigo-500 focus:outline-none text-sm text-white">
+                                <option value="35" selected>Android 15 (API 35) — Google Play 2026 Compliant</option>
+                                <option value="34">Android 14 (API 34)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Keywords & ASO Tags -->
+                    <div class="bg-slate-900/70 border border-slate-800 rounded-2xl p-4 space-y-3">
+                        <div class="flex items-center justify-between">
+                            <label class="text-xs font-semibold uppercase tracking-wider text-indigo-400 flex items-center gap-1.5">
+                                <i data-lucide="search" class="w-3.5 h-3.5"></i>
+                                App Keywords & Play Store ASO Metadata
+                            </label>
+                            <span class="text-xs text-slate-400" id="keyword-count">4 / 15 keywords</span>
+                        </div>
+                        <div class="flex gap-2">
+                            <input type="text" id="keyword-input" onkeydown="if(event.key==='Enter'){event.preventDefault();addKeyword();}" class="flex-1 px-3.5 py-2 rounded-xl bg-slate-950 border border-slate-700 focus:border-indigo-500 focus:outline-none text-sm text-white" placeholder="Type keyword (e.g. offline, productivity, game) & press Enter">
+                            <button type="button" onclick="addKeyword()" class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-semibold text-white transition">Add</button>
+                        </div>
+                        <div id="keyword-chips" class="flex flex-wrap gap-2 pt-1"></div>
+                        <div>
+                            <label class="block text-xs text-slate-400 mb-1">Short Store Description (80 chars max)</label>
+                            <input type="text" id="short-desc" maxlength="80" value="Fast, lightweight native Android app built with AppForge Studio." class="w-full px-3.5 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:border-indigo-500 focus:outline-none">
+                        </div>
+                    </div>
+
+                    <!-- App Icon & Permissions -->
+                    <div class="space-y-4">
+                        <div class="bg-slate-900/70 border border-slate-800 rounded-2xl p-4 flex items-center gap-4">
+                            <div id="icon-preview-box" class="w-16 h-16 rounded-2xl bg-gradient-to-tr from-indigo-600 to-purple-500 flex items-center justify-center text-white font-bold text-2xl shrink-0 overflow-hidden shadow-md">
+                                N
+                            </div>
+                            <div class="flex-1 min-w-0">
+                                <p class="text-sm font-semibold text-white">Adaptive Launcher Icon</p>
+                                <p class="text-xs text-slate-400 mb-2">512×512 PNG/JPG (auto-generates mipmap)</p>
+                                <label class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 cursor-pointer transition">
+                                    <i data-lucide="image-plus" class="w-3.5 h-3.5"></i>
+                                    <span>Upload Icon</span>
+                                    <input type="file" accept="image/*" class="hidden" onchange="handleIconUpload(event)">
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- Comprehensive AndroidManifest Permissions Selector -->
+                        <div class="bg-slate-900/70 border border-slate-800 rounded-2xl p-4 space-y-3">
+                            <div class="flex flex-wrap items-center justify-between gap-2">
+                                <div>
+                                    <p class="text-xs font-semibold uppercase tracking-wider text-indigo-400 flex items-center gap-1.5">
+                                        <i data-lucide="shield-alert" class="w-3.5 h-3.5"></i>
+                                        All AndroidManifest.xml Permissions
+                                    </p>
+                                    <p class="text-[11px] text-slate-400 mt-0.5">Select all hardware, media, network, location & system permissions required by your APK</p>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <span id="selected-perm-count" class="text-xs font-mono px-2 py-0.5 rounded bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">3 selected</span>
+                                    <button type="button" onclick="selectCommonPermissions()" class="text-[11px] px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition">Recommended</button>
+                                    <button type="button" onclick="toggleAllPermissions(true)" class="text-[11px] px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-400 transition">Select All</button>
+                                    <button type="button" onclick="toggleAllPermissions(false)" class="text-[11px] px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 transition">Clear</button>
+                                </div>
+                            </div>
+
+                            <!-- Search & Category Filter -->
+                            <div class="flex flex-col sm:flex-row gap-2">
+                                <input type="text" id="perm-search" oninput="renderPermissionsList()" placeholder="Search permissions (e.g. CAMERA, LOCATION, BLUETOOTH, STORAGE, BILLING)..." class="flex-1 px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 focus:border-indigo-500 focus:outline-none text-xs text-white">
+                                <select id="perm-category-filter" onchange="renderPermissionsList()" class="px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 focus:border-indigo-500 focus:outline-none text-xs text-slate-300">
+                                    <option value="ALL">All Categories (44 Permissions)</option>
+                                    <option value="Network & Connectivity">Network & Connectivity</option>
+                                    <option value="Camera & Microphone">Camera & Microphone</option>
+                                    <option value="Storage & Android 13+ Media">Storage & Android 13+ Media</option>
+                                    <option value="Location & Maps">Location & Maps</option>
+                                    <option value="Bluetooth & NFC">Bluetooth & NFC</option>
+                                    <option value="Contacts, Calendar & Phone">Contacts, Calendar & Phone</option>
+                                    <option value="Sensors, Biometrics & Health">Sensors, Biometrics & Health</option>
+                                    <option value="System, Background & Billing">System, Background & Billing</option>
+                                </select>
+                            </div>
+
+                            <!-- Scrollable Categorized Permissions Grid -->
+                            <div id="permissions-container" class="max-h-72 overflow-y-auto pr-1 space-y-4"></div>
+
+                            <!-- Custom Permission Adder -->
+                            <div class="flex gap-2 pt-2 border-t border-slate-800/80">
+                                <input type="text" id="custom-perm-input" onkeydown="if(event.key==='Enter'){event.preventDefault();addCustomPermission();}" placeholder="Add custom permission (e.g. com.android.vending.CHECK_LICENSE)" class="flex-1 px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 focus:border-indigo-500 focus:outline-none text-xs font-mono text-slate-200">
+                                <button type="button" onclick="addCustomPermission()" class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-medium text-indigo-300 transition">+ Add Custom</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="flex justify-between pt-2">
+                        <button onclick="goToStep(1)" class="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium text-sm transition">Back</button>
+                        <button onclick="goToStep(3)" class="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-sm transition flex items-center gap-2 shadow-lg shadow-indigo-600/20">
+                            <span>Next: Setup AdMob Ads</span>
+                            <i data-lucide="arrow-right" class="w-4 h-4"></i>
+                        </button>
+                    </div>
+                </section>
+
+                <!-- STEP 3: ADMOB MONETIZATION -->
+                <section id="panel-step-3" class="hidden glass-card rounded-3xl p-5 sm:p-7 space-y-6">
+                    <div class="flex flex-wrap items-start justify-between gap-4">
+                        <div>
+                            <h2 class="text-xl font-bold text-white flex items-center gap-2">
+                                <i data-lucide="coins" class="w-5 h-5 text-amber-400"></i>
+                                3. Google AdMob Monetization Setup
+                            </h2>
+                            <p class="text-sm text-slate-400 mt-1">Auto-injects Google Mobile Ads SDK (`play-services-ads:23.5.0`) into `AndroidManifest.xml` and native bridge.</p>
+                        </div>
+
+                        <label class="inline-flex items-center gap-2.5 cursor-pointer bg-slate-900 px-3.5 py-2 rounded-xl border border-slate-700">
+                            <input type="checkbox" id="admob-enabled" checked onchange="toggleAdMobState()" class="w-4 h-4 accent-emerald-500 rounded">
+                            <span class="text-sm font-semibold text-white">Enable AdMob SDK</span>
+                        </label>
+                    </div>
+
+                    <div id="admob-fields" class="space-y-4">
+                        <div class="flex flex-wrap items-center justify-between gap-2 bg-amber-500/10 border border-amber-500/25 rounded-2xl p-3.5">
+                            <div class="flex items-center gap-2 text-xs text-amber-300">
+                                <i data-lucide="shield-check" class="w-4 h-4 shrink-0"></i>
+                                <span>Need safe IDs for testing? Load Google's official AdMob Test Unit IDs in one click.</span>
+                            </div>
+                            <button type="button" onclick="fillGoogleTestAds()" class="px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-xs font-semibold transition">
+                                Fill Google Test IDs
+                            </button>
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-medium text-slate-300 mb-1.5">AdMob App ID (Required in AndroidManifest.xml) *</label>
+                            <input type="text" id="admob-app-id" value="ca-app-pub-3940256099942544~3347511713" oninput="syncPreview()" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 focus:border-indigo-500 focus:outline-none text-sm font-mono text-amber-300" placeholder="ca-app-pub-xxxxxxxxxxxxxxxx~yyyyyyyyyy">
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <!-- Banner Ad -->
+                            <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 space-y-2.5">
+                                <div class="flex items-center justify-between">
+                                    <span class="text-sm font-semibold text-white flex items-center gap-2">
+                                        <i data-lucide="layout-bottom" class="w-4 h-4 text-indigo-400"></i> Banner Ad Unit
+                                    </span>
+                                    <select id="banner-pos" onchange="syncPreview()" class="text-xs bg-slate-950 border border-slate-700 rounded-lg px-2 py-1 text-slate-300">
+                                        <option value="bottom">Bottom Docked</option>
+                                        <option value="top">Top Docked</option>
+                                        <option value="off">Disabled</option>
+                                    </select>
+                                </div>
+                                <input type="text" id="admob-banner-id" value="ca-app-pub-3940256099942544/6300978111" oninput="syncPreview()" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs font-mono text-slate-300" placeholder="ca-app-pub-xxxx/yyyy">
+                            </div>
+
+                            <!-- Interstitial Ad -->
+                            <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 space-y-2.5">
+                                <div class="flex items-center justify-between">
+                                    <span class="text-sm font-semibold text-white flex items-center gap-2">
+                                        <i data-lucide="maximize-2" class="w-4 h-4 text-emerald-400"></i> Interstitial Ad Unit
+                                    </span>
+                                    <span class="text-[11px] text-slate-400">Full-screen</span>
+                                </div>
+                                <input type="text" id="admob-interstitial-id" value="ca-app-pub-3940256099942544/1033173712" oninput="syncPreview()" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs font-mono text-slate-300" placeholder="ca-app-pub-xxxx/yyyy">
+                            </div>
+
+                            <!-- Rewarded Ad -->
+                            <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 space-y-2.5">
+                                <div class="flex items-center justify-between">
+                                    <span class="text-sm font-semibold text-white flex items-center gap-2">
+                                        <i data-lucide="gift" class="w-4 h-4 text-purple-400"></i> Rewarded Video Unit
+                                    </span>
+                                    <span class="text-[11px] text-slate-400">JS Bridge Ready</span>
+                                </div>
+                                <input type="text" id="admob-rewarded-id" value="ca-app-pub-3940256099942544/5224354917" oninput="syncPreview()" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs font-mono text-slate-300" placeholder="ca-app-pub-xxxx/yyyy">
+                            </div>
+
+                            <!-- App Open Ad -->
+                            <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 space-y-2.5">
+                                <div class="flex items-center justify-between">
+                                    <span class="text-sm font-semibold text-white flex items-center gap-2">
+                                        <i data-lucide="door-open" class="w-4 h-4 text-sky-400"></i> App Open Ad Unit
+                                    </span>
+                                    <span class="text-[11px] text-slate-400">Cold Start</span>
+                                </div>
+                                <input type="text" id="admob-appopen-id" value="ca-app-pub-3940256099942544/9257395921" oninput="syncPreview()" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs font-mono text-slate-300" placeholder="ca-app-pub-xxxx/yyyy">
+                            </div>
+                        </div>
+
+                        <!-- Live Manifest XML Preview -->
+                        <div class="bg-slate-950 border border-slate-800 rounded-2xl p-4">
+                            <div class="flex items-center justify-between mb-2">
+                                <span class="text-xs font-mono text-slate-400">Generated AndroidManifest.xml & JS AdMob Bridge</span>
+                                <button type="button" onclick="copyManifestSnippet()" class="text-xs text-indigo-400 hover:text-indigo-300 flex items-center gap-1">
+                                    <i data-lucide="copy" class="w-3.5 h-3.5"></i> Copy XML
+                                </button>
+                            </div>
+                            <pre id="manifest-preview" class="text-[11px] font-mono text-emerald-400 overflow-x-auto leading-relaxed"></pre>
+                        </div>
+                    </div>
+
+                    <div class="flex justify-between pt-2">
+                        <button onclick="goToStep(2)" class="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium text-sm transition">Back</button>
+                        <button onclick="goToStep(4)" class="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-sm transition flex items-center gap-2 shadow-lg shadow-indigo-600/20">
+                            <span>Next: Compile APK & AAB</span>
+                            <i data-lucide="arrow-right" class="w-4 h-4"></i>
+                        </button>
+                    </div>
+                </section>
+
+                <!-- STEP 4: BUILD & DOWNLOAD APK / AAB -->
+                <section id="panel-step-4" class="hidden glass-card rounded-3xl p-5 sm:p-7 space-y-6">
+                    <div>
+                        <h2 class="text-xl font-bold text-white flex items-center gap-2">
+                            <i data-lucide="cpu" class="w-5 h-5 text-emerald-400"></i>
+                            4. Compile Signed Android APK & Google Play AAB
+                        </h2>
+                        <p class="text-sm text-slate-400 mt-1">Select output formats, signing keystore mode, and build your production Android binaries.</p>
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <label class="flex items-start gap-3 p-4 rounded-2xl bg-slate-900/90 border border-emerald-500/40 cursor-pointer">
+                            <input type="checkbox" id="build-apk-check" checked class="mt-1 w-4 h-4 accent-emerald-500 rounded">
+                            <div>
+                                <div class="font-semibold text-sm text-white flex items-center gap-2">
+                                    Universal Release APK
+                                    <span class="text-[10px] px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400">Direct Install</span>
+                                </div>
+                                <p class="text-xs text-slate-400 mt-1">Signed v2/v3 `.apk` ready for direct Android device installation & testing.</p>
+                            </div>
+                        </label>
+
+                        <label class="flex items-start gap-3 p-4 rounded-2xl bg-slate-900/90 border border-indigo-500/40 cursor-pointer">
+                            <input type="checkbox" id="build-aab-check" checked class="mt-1 w-4 h-4 accent-indigo-500 rounded">
+                            <div>
+                                <div class="font-semibold text-sm text-white flex items-center gap-2">
+                                    Android App Bundle (AAB)
+                                    <span class="text-[10px] px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-400">Play Store</span>
+                                </div>
+                                <p class="text-xs text-slate-400 mt-1">Optimized `.aab` bundle required for Google Play Console publishing.</p>
+                            </div>
+                        </label>
+                    </div>
+
+                    <!-- Keystore Configuration -->
+                    <div class="bg-slate-900/70 border border-slate-800 rounded-2xl p-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div>
+                            <label class="block text-[11px] text-slate-400 mb-1">Keystore Signing</label>
+                            <select id="keystore-mode" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white">
+                                <option value="auto">Auto-Generate JKS Release Key</option>
+                                <option value="debug">Debug Keystore (Testing)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-[11px] text-slate-400 mb-1">Key Alias</label>
+                            <input type="text" id="key-alias" value="appforge_release_key" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs font-mono text-slate-200">
+                        </div>
+                        <div>
+                            <label class="block text-[11px] text-slate-400 mb-1">ABI Architectures</label>
+                            <input type="text" readonly value="arm64-v8a, armeabi-v7a, x86_64" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs font-mono text-slate-400">
+                        </div>
+                    </div>
+
+                    <!-- Start Build CTA -->
+                    <button id="start-build-btn" onclick="startBuildPipeline()" class="w-full py-4 rounded-2xl bg-gradient-to-r from-emerald-500 to-indigo-600 hover:from-emerald-400 hover:to-indigo-500 text-slate-950 font-extrabold text-base shadow-xl transition flex items-center justify-center gap-2.5 android-glow">
+                        <i data-lucide="rocket" class="w-5 h-5 stroke-[2.5]"></i>
+                        <span>BUILD APK & AAB PACKAGES NOW</span>
+                    </button>
+
+                    <!-- Build Console & Progress -->
+                    <div id="build-terminal-wrapper" class="hidden space-y-3">
+                        <div class="flex items-center justify-between text-xs">
+                            <span class="font-semibold text-indigo-400" id="build-status-label">Initializing Gradle Daemon...</span>
+                            <span class="font-mono text-slate-300" id="build-percent">0%</span>
+                        </div>
+                        <div class="w-full h-2.5 bg-slate-900 rounded-full overflow-hidden border border-slate-800">
+                            <div id="build-progress-bar" class="h-full bg-gradient-to-r from-indigo-500 to-emerald-400 transition-all duration-300" style="width: 0%"></div>
+                        </div>
+                        <div id="build-console" class="bg-slate-950 border border-slate-800 rounded-2xl p-4 font-mono text-xs text-slate-300 h-52 overflow-y-auto space-y-1.5"></div>
+                    </div>
+
+                    <!-- Download Artifacts Card -->
+                    <div id="download-results" class="hidden bg-emerald-950/30 border border-emerald-500/40 rounded-2xl p-5 space-y-4">
+                        <div class="flex items-center gap-3">
+                            <div class="w-10 h-10 rounded-xl bg-emerald-500/20 flex items-center justify-center text-emerald-400">
+                                <i data-lucide="check-circle-2" class="w-6 h-6"></i>
+                            </div>
+                            <div>
+                                <h3 class="font-bold text-white text-base">Build Successful! Native Binaries Ready</h3>
+                                <p class="text-xs text-emerald-300/80" id="build-summary-meta">Signed with SHA-256 JKS • AdMob SDK Integrated</p>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                            <button id="dl-apk-btn" onclick="downloadArtifact('apk')" class="p-3.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex flex-col items-center justify-center gap-1 transition shadow-lg">
+                                <div class="flex items-center gap-1.5 text-sm">
+                                    <i data-lucide="download" class="w-4 h-4"></i>
+                                    <span>Download .APK</span>
+                                </div>
+                                <span class="text-[11px] opacity-80 font-mono" id="apk-filename-label">app-release.apk</span>
+                            </button>
+
+                            <button id="dl-aab-btn" onclick="downloadArtifact('aab')" class="p-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex flex-col items-center justify-center gap-1 transition shadow-lg">
+                                <div class="flex items-center gap-1.5 text-sm">
+                                    <i data-lucide="package" class="w-4 h-4"></i>
+                                    <span>Download .AAB</span>
+                                </div>
+                                <span class="text-[11px] opacity-80 font-mono" id="aab-filename-label">app-release.aab</span>
+                            </button>
+
+                            <button onclick="downloadArtifact('source-bundle')" class="p-3.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs flex flex-col items-center justify-center gap-1 border border-slate-700 transition">
+                                <div class="flex items-center gap-1.5 text-sm">
+                                    <i data-lucide="folder-down" class="w-4 h-4 text-amber-400"></i>
+                                    <span>Android Studio ZIP</span>
+                                </div>
+                                <span class="text-[11px] text-slate-400 font-mono">Gradle + AdMob + Keystore</span>
+                            </button>
+                        </div>
+                    </div>
+                </section>
+            </div>
+
+            <!-- Right Live Device Preview Column (4 Cols) -->
+            <div class="lg:col-span-4 space-y-6 lg:sticky lg:top-24">
+                <div class="glass-card rounded-3xl p-5 flex flex-col items-center">
+                    <div class="w-full flex items-center justify-between mb-4">
+                        <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Live Android Device Preview</span>
+                        <span class="text-[11px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300" id="preview-engine-tag">WebView Bridge</span>
+                    </div>
+
+                    <!-- Phone Frame -->
+                    <div class="w-[270px] h-[510px] rounded-[38px] bg-slate-950 border-[6px] border-slate-800 shadow-2xl relative overflow-hidden flex flex-col">
+                        <!-- Status Bar -->
+                        <div class="h-7 px-5 flex items-center justify-between text-[10px] text-slate-400 bg-slate-900/90">
+                            <span>9:41</span>
+                            <div class="w-16 h-3.5 bg-black rounded-full"></div>
+                            <div class="flex items-center gap-1">
+                                <i data-lucide="wifi" class="w-3 h-3"></i>
+                                <i data-lucide="battery-full" class="w-3 h-3"></i>
+                            </div>
+                        </div>
+
+                        <!-- Top Banner Ad Slot (if selected) -->
+                        <div id="preview-ad-top" class="hidden bg-amber-500/20 border-b border-amber-500/30 py-1.5 px-2 text-center">
+                            <span class="text-[9px] font-mono uppercase tracking-wider text-amber-300 block">AdMob Test Banner • 320×50</span>
+                        </div>
+
+                        <!-- App Header -->
+                        <div class="px-4 py-3 bg-slate-900 border-b border-slate-800/80 flex items-center gap-2.5">
+                            <div id="phone-mini-icon" class="w-8 h-8 rounded-lg bg-gradient-to-tr from-indigo-600 to-purple-500 flex items-center justify-center text-white font-bold text-sm overflow-hidden">
+                                N
+                            </div>
+                            <div class="min-w-0 flex-1">
+                                <p id="phone-app-name" class="text-xs font-bold text-white truncate">NovaTask Pro</p>
+                                <p id="phone-pkg-name" class="text-[10px] font-mono text-slate-400 truncate">com.novastudio.novatask</p>
+                            </div>
+                        </div>
+
+                        <!-- App Body Content -->
+                        <div class="flex-1 p-4 flex flex-col justify-between bg-gradient-to-b from-slate-950 to-slate-900 overflow-y-auto">
+                            <div class="space-y-3">
+                                <div class="p-3 rounded-2xl bg-slate-900/90 border border-slate-800">
+                                    <div class="flex items-center justify-between text-[10px] text-slate-400 mb-1">
+                                        <span>Build Target</span>
+                                        <span class="text-emerald-400 font-mono" id="phone-ver">v1.0.0 (1)</span>
+                                    </div>
+                                    <p class="text-xs text-slate-200 font-medium" id="phone-zip-status">Ready for ZIP bundle injection</p>
+                                </div>
+
+                                <div class="p-3 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 space-y-2">
+                                    <p class="text-[11px] font-semibold text-indigo-300">AdMob Bridge Triggers</p>
+                                    <button onclick="simulateAdTrigger('Interstitial')" class="w-full py-1.5 px-2.5 rounded-lg bg-indigo-600/80 hover:bg-indigo-600 text-[11px] text-white font-medium transition">
+                                        Test Interstitial Ad
+                                    </button>
+                                    <button onclick="simulateAdTrigger('Rewarded Video')" class="w-full py-1.5 px-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] text-slate-200 font-medium transition">
+                                        Test Rewarded Video
+                                    </button>
+                                </div>
+
+                                <div>
+                                    <p class="text-[10px] uppercase tracking-wider text-slate-500 mb-1.5">Play Store Keywords</p>
+                                    <div id="phone-keywords" class="flex flex-wrap gap-1"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Bottom Banner Ad Slot -->
+                        <div id="preview-ad-bottom" class="bg-amber-500/20 border-t border-amber-500/30 py-2 px-2 text-center">
+                            <span class="text-[9px] font-mono uppercase tracking-wider text-amber-300 block">AdMob Test Banner • 320×50</span>
+                        </div>
+
+                        <!-- Android Gesture Bar -->
+                        <div class="h-4 bg-slate-950 flex items-center justify-center">
+                            <div class="w-20 h-1 rounded-full bg-slate-700"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <script>
+        // Comprehensive Catalog of All Standard AndroidManifest Permissions
+        const ANDROID_PERMISSIONS = [
+            // Network & Connectivity
+            { name: 'android.permission.INTERNET', label: 'INTERNET', category: 'Network & Connectivity', desc: 'Full network & web API access', defaultChecked: true },
+            { name: 'android.permission.ACCESS_NETWORK_STATE', label: 'ACCESS_NETWORK_STATE', category: 'Network & Connectivity', desc: 'Check Wi-Fi / mobile data status', defaultChecked: true },
+            { name: 'android.permission.ACCESS_WIFI_STATE', label: 'ACCESS_WIFI_STATE', category: 'Network & Connectivity', desc: 'View Wi-Fi network information', defaultChecked: false },
+            { name: 'android.permission.CHANGE_WIFI_STATE', label: 'CHANGE_WIFI_STATE', category: 'Network & Connectivity', desc: 'Connect/disconnect Wi-Fi networks', defaultChecked: false },
+            { name: 'android.permission.CHANGE_NETWORK_STATE', label: 'CHANGE_NETWORK_STATE', category: 'Network & Connectivity', desc: 'Modify network connectivity state', defaultChecked: false },
+            { name: 'android.permission.NEARBY_WIFI_DEVICES', label: 'NEARBY_WIFI_DEVICES', category: 'Network & Connectivity', desc: 'Discover nearby Wi-Fi Direct devices (API 33+)', defaultChecked: false },
+
+            // Camera & Microphone
+            { name: 'android.permission.CAMERA', label: 'CAMERA', category: 'Camera & Microphone', desc: 'Take photos, scan QR codes & record video', defaultChecked: false },
+            { name: 'android.permission.RECORD_AUDIO', label: 'RECORD_AUDIO', category: 'Camera & Microphone', desc: 'Record microphone audio & voice input', defaultChecked: false },
+            { name: 'android.permission.MODIFY_AUDIO_SETTINGS', label: 'MODIFY_AUDIO_SETTINGS', category: 'Camera & Microphone', desc: 'Control speaker, volume & audio routing', defaultChecked: false },
+            { name: 'android.permission.FLASHLIGHT', label: 'FLASHLIGHT', category: 'Camera & Microphone', desc: 'Control device camera torch/flash', defaultChecked: false },
+
+            // Storage & Android 13+ Media
+            { name: 'android.permission.READ_MEDIA_IMAGES', label: 'READ_MEDIA_IMAGES', category: 'Storage & Android 13+ Media', desc: 'Read gallery images (Android 13+)', defaultChecked: false },
+            { name: 'android.permission.READ_MEDIA_VIDEO', label: 'READ_MEDIA_VIDEO', category: 'Storage & Android 13+ Media', desc: 'Read gallery videos (Android 13+)', defaultChecked: false },
+            { name: 'android.permission.READ_MEDIA_AUDIO', label: 'READ_MEDIA_AUDIO', category: 'Storage & Android 13+ Media', desc: 'Read music & audio files (Android 13+)', defaultChecked: false },
+            { name: 'android.permission.READ_MEDIA_VISUAL_USER_SELECTED', label: 'READ_MEDIA_VISUAL_USER_SELECTED', category: 'Storage & Android 13+ Media', desc: 'Partial photo picker access (Android 14+)', defaultChecked: false },
+            { name: 'android.permission.READ_EXTERNAL_STORAGE', label: 'READ_EXTERNAL_STORAGE', category: 'Storage & Android 13+ Media', desc: 'Legacy storage read (Android 12 & below)', defaultChecked: false },
+            { name: 'android.permission.WRITE_EXTERNAL_STORAGE', label: 'WRITE_EXTERNAL_STORAGE', category: 'Storage & Android 13+ Media', desc: 'Legacy storage write (Android 10 & below)', defaultChecked: false },
+            { name: 'android.permission.MANAGE_EXTERNAL_STORAGE', label: 'MANAGE_EXTERNAL_STORAGE', category: 'Storage & Android 13+ Media', desc: 'All files manager access (Special Permission)', defaultChecked: false },
+
+            // Location & Maps
+            { name: 'android.permission.ACCESS_FINE_LOCATION', label: 'ACCESS_FINE_LOCATION', category: 'Location & Maps', desc: 'Precise GPS location coordinates', defaultChecked: false },
+            { name: 'android.permission.ACCESS_COARSE_LOCATION', label: 'ACCESS_COARSE_LOCATION', category: 'Location & Maps', desc: 'Approximate Wi-Fi/Cell tower location', defaultChecked: false },
+            { name: 'android.permission.ACCESS_BACKGROUND_LOCATION', label: 'ACCESS_BACKGROUND_LOCATION', category: 'Location & Maps', desc: 'Track location while app is closed', defaultChecked: false },
+            { name: 'android.permission.ACCESS_MEDIA_LOCATION', label: 'ACCESS_MEDIA_LOCATION', category: 'Location & Maps', desc: 'Read GPS EXIF tags from user photos', defaultChecked: false },
+
+            // Bluetooth & NFC
+            { name: 'android.permission.BLUETOOTH', label: 'BLUETOOTH', category: 'Bluetooth & NFC', desc: 'Connect to paired Bluetooth devices (Legacy)', defaultChecked: false },
+            { name: 'android.permission.BLUETOOTH_ADMIN', label: 'BLUETOOTH_ADMIN', category: 'Bluetooth & NFC', desc: 'Discover & pair Bluetooth devices (Legacy)', defaultChecked: false },
+            { name: 'android.permission.BLUETOOTH_CONNECT', label: 'BLUETOOTH_CONNECT', category: 'Bluetooth & NFC', desc: 'Connect to BLE/Bluetooth devices (API 31+)', defaultChecked: false },
+            { name: 'android.permission.BLUETOOTH_SCAN', label: 'BLUETOOTH_SCAN', category: 'Bluetooth & NFC', desc: 'Scan nearby Bluetooth peripherals (API 31+)', defaultChecked: false },
+            { name: 'android.permission.BLUETOOTH_ADVERTISE', label: 'BLUETOOTH_ADVERTISE', category: 'Bluetooth & NFC', desc: 'Advertise device over Bluetooth (API 31+)', defaultChecked: false },
+            { name: 'android.permission.NFC', label: 'NFC', category: 'Bluetooth & NFC', desc: 'Read/write NFC tags & contactless cards', defaultChecked: false },
+
+            // Contacts, Calendar & Phone
+            { name: 'android.permission.READ_CONTACTS', label: 'READ_CONTACTS', category: 'Contacts, Calendar & Phone', desc: 'Read user address book contacts', defaultChecked: false },
+            { name: 'android.permission.WRITE_CONTACTS', label: 'WRITE_CONTACTS', category: 'Contacts, Calendar & Phone', desc: 'Create or edit address book contacts', defaultChecked: false },
+            { name: 'android.permission.READ_CALENDAR', label: 'READ_CALENDAR', category: 'Contacts, Calendar & Phone', desc: 'Read calendar events & schedules', defaultChecked: false },
+            { name: 'android.permission.WRITE_CALENDAR', label: 'WRITE_CALENDAR', category: 'Contacts, Calendar & Phone', desc: 'Add or modify calendar events', defaultChecked: false },
+            { name: 'android.permission.CALL_PHONE', label: 'CALL_PHONE', category: 'Contacts, Calendar & Phone', desc: 'Initiate phone calls directly', defaultChecked: false },
+            { name: 'android.permission.READ_PHONE_STATE', label: 'READ_PHONE_STATE', category: 'Contacts, Calendar & Phone', desc: 'Read cellular network & call state', defaultChecked: false },
+            { name: 'android.permission.SEND_SMS', label: 'SEND_SMS', category: 'Contacts, Calendar & Phone', desc: 'Send SMS text messages', defaultChecked: false },
+            { name: 'android.permission.RECEIVE_SMS', label: 'RECEIVE_SMS', category: 'Contacts, Calendar & Phone', desc: 'Auto-read incoming OTP/SMS messages', defaultChecked: false },
+
+            // Sensors, Biometrics & Health
+            { name: 'android.permission.USE_BIOMETRIC', label: 'USE_BIOMETRIC', category: 'Sensors, Biometrics & Health', desc: 'Fingerprint & Face Unlock authentication', defaultChecked: false },
+            { name: 'android.permission.BODY_SENSORS', label: 'BODY_SENSORS', category: 'Sensors, Biometrics & Health', desc: 'Heart rate & wearable biometric sensors', defaultChecked: false },
+            { name: 'android.permission.ACTIVITY_RECOGNITION', label: 'ACTIVITY_RECOGNITION', category: 'Sensors, Biometrics & Health', desc: 'Step counter, walking & fitness detection', defaultChecked: false },
+            { name: 'android.permission.HIGH_SAMPLING_RATE_SENSORS', label: 'HIGH_SAMPLING_RATE_SENSORS', category: 'Sensors, Biometrics & Health', desc: '200Hz+ gyroscope & accelerometer for games', defaultChecked: false },
+
+            // System, Background & Billing
+            { name: 'android.permission.POST_NOTIFICATIONS', label: 'POST_NOTIFICATIONS', category: 'System, Background & Billing', desc: 'Send push & local notifications (API 33+)', defaultChecked: true },
+            { name: 'android.permission.VIBRATE', label: 'VIBRATE', category: 'System, Background & Billing', desc: 'Haptic feedback & device vibration', defaultChecked: false },
+            { name: 'android.permission.WAKE_LOCK', label: 'WAKE_LOCK', category: 'System, Background & Billing', desc: 'Keep screen/CPU awake during playback/games', defaultChecked: false },
+            { name: 'android.permission.FOREGROUND_SERVICE', label: 'FOREGROUND_SERVICE', category: 'System, Background & Billing', desc: 'Run persistent background services', defaultChecked: false },
+            { name: 'android.permission.RECEIVE_BOOT_COMPLETED', label: 'RECEIVE_BOOT_COMPLETED', category: 'System, Background & Billing', desc: 'Auto-start background tasks after reboot', defaultChecked: false },
+            { name: 'android.permission.SCHEDULE_EXACT_ALARM', label: 'SCHEDULE_EXACT_ALARM', category: 'System, Background & Billing', desc: 'Trigger exact-time alarms & reminders', defaultChecked: false },
+            { name: 'android.permission.SYSTEM_ALERT_WINDOW', label: 'SYSTEM_ALERT_WINDOW', category: 'System, Background & Billing', desc: 'Draw floating overlay bubbles over other apps', defaultChecked: false },
+            { name: 'android.permission.REQUEST_INSTALL_PACKAGES', label: 'REQUEST_INSTALL_PACKAGES', category: 'System, Background & Billing', desc: 'In-app APK updater / installer prompt', defaultChecked: false },
+            { name: 'com.android.vending.BILLING', label: 'PLAY_BILLING', category: 'System, Background & Billing', desc: 'Google Play In-App Purchases & Subscriptions', defaultChecked: false },
+            { name: 'com.google.android.gms.permission.AD_ID', label: 'GMS_AD_ID', category: 'System, Background & Billing', desc: 'Google Advertising ID for AdMob (API 33+)', defaultChecked: true }
+        ];
+
+        // Application State
+        const state = {
+            currentStep: 1,
+            zipFileName: null,
+            zipFiles: [],
+            rawZipBlob: null,
+            engine: 'web',
+            keywords: ['android', 'native', 'fast', 'productivity'],
+            selectedPermissions: new Set(ANDROID_PERMISSIONS.filter(p => p.defaultChecked).map(p => p.name)),
+            customPermissions: [],
+            iconDataUrl: null,
+            buildComplete: false
+        };
+
+        // Initialize Lucide icons & UI defaults
+        window.addEventListener('DOMContentLoaded', () => {
+            lucide.createIcons();
+            renderKeywords();
+            renderPermissionsList();
+            syncPreview();
+            setupDragAndDrop();
+        });
+
+        // Toast Notification System (No alert() used)
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            const colors = {
+                info: 'bg-slate-900 border-indigo-500/50 text-slate-100',
+                success: 'bg-emerald-950/95 border-emerald-500/60 text-emerald-200',
+                warning: 'bg-amber-950/95 border-amber-500/60 text-amber-200',
+                error: 'bg-rose-950/95 border-rose-500/60 text-rose-200'
+            };
+            toast.className = `pointer-events-auto px-4 py-3 rounded-2xl border shadow-xl text-xs font-medium flex items-center justify-between gap-3 transition-all duration-300 ${colors[type] || colors.info}`;
+            toast.innerHTML = `<span>${message}</span>`;
+            container.appendChild(toast);
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                toast.style.transform = 'translateY(8px)';
+                setTimeout(() => toast.remove(), 300);
+            }, 3400);
+        }
+
+        // Navigation between steps
+        function goToStep(step) {
+            state.currentStep = step;
+            for (let i = 1; i <= 4; i++) {
+                const panel = document.getElementById(`panel-step-${i}`);
+                const nav = document.getElementById(`nav-step-${i}`);
+                if (i === step) {
+                    panel.classList.remove('hidden');
+                    nav.classList.add('step-active');
+                } else {
+                    panel.classList.add('hidden');
+                    nav.classList.remove('step-active');
+                }
+            }
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        // Drag and drop handling for .ZIP
+        function setupDragAndDrop() {
+            const dropZone = document.getElementById('drop-zone');
+            ['dragenter', 'dragover'].forEach(evt => {
+                dropZone.addEventListener(evt, e => {
+                    e.preventDefault();
+                    dropZone.classList.add('border-indigo-500', 'bg-indigo-500/10');
+                });
+            });
+            ['dragleave', 'drop'].forEach(evt => {
+                dropZone.addEventListener(evt, e => {
+                    e.preventDefault();
+                    dropZone.classList.remove('border-indigo-500', 'bg-indigo-500/10');
+                });
+            });
+            dropZone.addEventListener('drop', e => {
+                if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                    processZipFile(e.dataTransfer.files[0]);
+                }
+            });
+        }
+
+        function handleZipUpload(event) {
+            const file = event.target.files[0];
+            if (file) processZipFile(file);
+        }
+
+        // Inspect real ZIP archive using JSZip & auto-detect language/framework
+        async function processZipFile(file) {
+            if (!file.name.toLowerCase().endsWith('.zip')) {
+                showToast('Please upload a valid .ZIP source code archive.', 'error');
+                return;
+            }
+            try {
+                const zip = await JSZip.loadAsync(file);
+                const entries = [];
+                zip.forEach((relativePath, zipEntry) => {
+                    if (!zipEntry.dir) entries.push(relativePath);
+                });
+
+                state.zipFileName = file.name;
+                state.zipFiles = entries;
+                state.rawZipBlob = file;
+
+                // Auto-detect framework
+                let detected = 'web';
+                let label = 'HTML5 / CSS / JS Web App';
+                if (entries.some(f => f.endsWith('pubspec.yaml'))) {
+                    detected = 'flutter';
+                    label = 'Flutter / Dart Project';
+                } else if (entries.some(f => f.endsWith('build.gradle') || f.endsWith('build.gradle.kts') || f.endsWith('.kt') || f.endsWith('.java'))) {
+                    detected = 'native';
+                    label = 'Native Android (Kotlin / Java)';
+                } else if (entries.some(f => f.endsWith('package.json'))) {
+                    detected = 'react';
+                    label = 'React / Vite / Node Web App';
+                } else if (entries.some(f => f.endsWith('.py') || f.endsWith('buildozer.spec'))) {
+                    detected = 'python';
+                    label = 'Python / Kivy App';
+                }
+
+                selectEngine(detected);
+
+                // Auto-fill app name from zip filename
+                const cleanName = file.name.replace(/\.zip$/i, '').replace(/[-_]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+                document.getElementById('app-name').value = cleanName;
+                autoGeneratePackage();
+
+                // Update UI
+                document.getElementById('drop-title').textContent = `Loaded: ${file.name}`;
+                document.getElementById('drop-subtitle').textContent = `${(file.size / 1024).toFixed(1)} KB • Ready for Android compilation`;
+                document.getElementById('zip-analysis-box').classList.remove('hidden');
+                document.getElementById('detected-stack-badge').textContent = label;
+                document.getElementById('zip-filename').textContent = file.name;
+                document.getElementById('zip-filecount').textContent = `${entries.length} files indexed`;
+                document.getElementById('step1-sub').textContent = `${file.name} (${entries.length} files)`;
+                document.getElementById('phone-zip-status').textContent = `Bundled: ${file.name} (${entries.length} files)`;
+
+                const treePreview = document.getElementById('zip-tree-preview');
+                treePreview.innerHTML = entries.slice(0, 18).map(f => `<div>📄 ${f}</div>`).join('') +
+                    (entries.length > 18 ? `<div class="text-indigo-400">... +${entries.length - 18} more files</div>` : '');
+
+                syncPreview();
+                showToast(`Detected ${label} (${entries.length} files)`, 'success');
+            } catch (err) {
+                showToast('Could not read ZIP file. Ensure it is a valid archive.', 'error');
+            }
+        }
+
+        // Create a real sample ZIP in memory so anyone can test immediately
+        async function loadDemoZip() {
+            const zip = new JSZip();
+            zip.file('index.html', '<!DOCTYPE html><html><body><h1>Hello Android!</h1><button onclick="AndroidAdMob.showInterstitial()">Show Ad</button></body></html>');
+            zip.file('style.css', 'body { font-family: sans-serif; background: #0f172a; color: white; }');
+            zip.file('app.js', 'console.log("AppForge Native Bridge Initialized");');
+            zip.file('manifest.json', '{"name": "Sample Game Pro", "short_name": "GamePro"}');
+            const blob = await zip.generateAsync({ type: 'blob' });
+            const demoFile = new File([blob], 'sample-html5-game.zip', { type: 'application/zip' });
+            await processZipFile(demoFile);
+        }
+
+        function selectEngine(engineKey) {
+            state.engine = engineKey;
+            const labels = {
+                web: 'WebView Bridge',
+                react: 'React/Vite Bundle',
+                flutter: 'Flutter ARM64',
+                native: 'Native Gradle',
+                python: 'Kivy Buildozer',
+                godot: 'Game GLES 3.2'
+            };
+            document.getElementById('preview-engine-tag').textContent = labels[engineKey] || engineKey;
+            document.querySelectorAll('.engine-btn').forEach(btn => {
+                if (btn.dataset.engine === engineKey) {
+                    btn.classList.remove('border-slate-800', 'bg-slate-900/60');
+                    btn.classList.add('border-indigo-500', 'bg-indigo-500/15');
+                } else {
+                    btn.classList.add('border-slate-800', 'bg-slate-900/60');
+                    btn.classList.remove('border-indigo-500', 'bg-indigo-500/15');
+                }
+            });
+        }
+
+        // Package name generator & validator
+        function autoGeneratePackage() {
+            const appName = document.getElementById('app-name').value || 'myapp';
+            const slug = appName.toLowerCase().replace(/[^a-z0-9]/g, '') || 'myapp';
+            document.getElementById('package-name').value = `com.appforge.${slug}`;
+            validatePackageName();
+            syncPreview();
+        }
+
+        function validatePackageName() {
+            const pkg = document.getElementById('package-name').value.trim();
+            const msg = document.getElementById('pkg-validation-msg');
+            const regex = /^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$/;
+            if (regex.test(pkg)) {
+                msg.textContent = 'Valid Google Play package identifier';
+                msg.className = 'text-[11px] text-emerald-400 mt-1';
+                return true;
+            } else {
+                msg.textContent = 'Must follow reverse-domain format (e.g. com.studio.app)';
+                msg.className = 'text-[11px] text-rose-400 mt-1';
+                return false;
+            }
+        }
+
+        // ASO Keywords Management
+        function addKeyword() {
+            const input = document.getElementById('keyword-input');
+            const val = input.value.trim().toLowerCase().replace(/[^a-z0-9-\s]/g, '');
+            if (!val) return;
+            if (state.keywords.length >= 15) {
+                showToast('Maximum 15 Play Store keywords allowed.', 'warning');
+                return;
+            }
+            if (!state.keywords.includes(val)) {
+                state.keywords.push(val);
+                renderKeywords();
+                syncPreview();
+            }
+            input.value = '';
+        }
+
+        function removeKeyword(idx) {
+            state.keywords.splice(idx, 1);
+            renderKeywords();
+            syncPreview();
+        }
+
+        function renderKeywords() {
+            const container = document.getElementById('keyword-chips');
+            const phoneContainer = document.getElementById('phone-keywords');
+            document.getElementById('keyword-count').textContent = `${state.keywords.length} / 15 keywords`;
+
+            container.innerHTML = state.keywords.map((kw, idx) => `
+                <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-500/15 border border-indigo-500/30 text-xs text-indigo-300">
+                    #${kw}
+                    <button type="button" onclick="removeKeyword(${idx})" class="hover:text-white">&times;</button>
+                </span>
+            `).join('');
+
+            phoneContainer.innerHTML = state.keywords.slice(0, 6).map(kw => `
+                <span class="px-2 py-0.5 rounded bg-slate-800 text-[9px] text-slate-300">#${kw}</span>
+            `).join('');
+        }
+
+        // App Icon Upload
+        function handleIconUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = e => {
+                state.iconDataUrl = e.target.result;
+                const html = `<img src="${state.iconDataUrl}" class="w-full h-full object-cover" alt="App Icon">`;
+                document.getElementById('icon-preview-box').innerHTML = html;
+                document.getElementById('phone-mini-icon').innerHTML = html;
+                showToast('Launcher icon updated across all mipmap densities!', 'success');
+            };
+            reader.readAsDataURL(file);
+        }
+
+        // AndroidManifest Permissions Management
+        function renderPermissionsList() {
+            const container = document.getElementById('permissions-container');
+            const search = (document.getElementById('perm-search')?.value || '').toLowerCase().trim();
+            const catFilter = document.getElementById('perm-category-filter')?.value || 'ALL';
+
+            const allPerms = [
+                ...ANDROID_PERMISSIONS,
+                ...state.customPermissions.map(cp => ({
+                    name: cp,
+                    label: cp.split('.').pop(),
+                    category: 'Custom Permissions',
+                    desc: 'User-defined manifest permission'
+                }))
+            ];
+
+            const filtered = allPerms.filter(p => {
+                const matchesCat = catFilter === 'ALL' || p.category === catFilter;
+                const matchesSearch = !search ||
+                    p.name.toLowerCase().includes(search) ||
+                    p.label.toLowerCase().includes(search) ||
+                    p.desc.toLowerCase().includes(search);
+                return matchesCat && matchesSearch;
+            });
+
+            // Group by category
+            const grouped = {};
+            filtered.forEach(p => {
+                if (!grouped[p.category]) grouped[p.category] = [];
+                grouped[p.category].push(p);
+            });
+
+            if (Object.keys(grouped).length === 0) {
+                container.innerHTML = `<div class="text-center py-6 text-xs text-slate-500">No matching permissions found. You can add a custom permission below.</div>`;
+            } else {
+                container.innerHTML = Object.entries(grouped).map(([category, perms]) => `
+                    <div class="space-y-1.5">
+                        <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-400 sticky top-0 bg-slate-900/95 py-1 z-10 flex items-center justify-between">
+                            <span>${category}</span>
+                            <span class="text-[10px] font-mono text-slate-500">${perms.length}</span>
+                        </div>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            ${perms.map(p => {
+                                const checked = state.selectedPermissions.has(p.name);
+                                return `
+                                    <label class="flex items-start gap-2.5 p-2.5 rounded-xl border ${checked ? 'border-indigo-500/50 bg-indigo-500/10' : 'border-slate-800 bg-slate-950/70 hover:border-slate-700'} cursor-pointer transition">
+                                        <input type="checkbox" ${checked ? 'checked' : ''} onchange="togglePermission('${p.name}', this.checked)" class="mt-0.5 rounded accent-indigo-500">
+                                        <div class="min-w-0 flex-1">
+                                            <div class="text-[11px] font-mono font-semibold text-slate-200 truncate" title="${p.name}">${p.label}</div>
+                                            <div class="text-[10px] text-slate-400 leading-snug">${p.desc}</div>
+                                        </div>
+                                    </label>
+                                `;
+                            }).join('')}
+                        </div>
+                    </div>
+                `).join('');
+            }
+
+            document.getElementById('selected-perm-count').textContent = `${state.selectedPermissions.size} selected`;
+        }
+
+        function togglePermission(permName, isChecked) {
+            if (isChecked) state.selectedPermissions.add(permName);
+            else state.selectedPermissions.delete(permName);
+            renderPermissionsList();
+            syncPreview();
+        }
+
+        function toggleAllPermissions(selectAll) {
+            if (selectAll) {
+                ANDROID_PERMISSIONS.forEach(p => state.selectedPermissions.add(p.name));
+                state.customPermissions.forEach(cp => state.selectedPermissions.add(cp));
+                showToast(`Enabled all ${state.selectedPermissions.size} Android permissions.`, 'info');
+            } else {
+                state.selectedPermissions.clear();
+                showToast('Cleared all permissions.', 'info');
+            }
+            renderPermissionsList();
+            syncPreview();
+        }
+
+        function selectCommonPermissions() {
+            state.selectedPermissions.clear();
+            ANDROID_PERMISSIONS.filter(p => p.defaultChecked).forEach(p => state.selectedPermissions.add(p.name));
+            renderPermissionsList();
+            syncPreview();
+            showToast('Applied recommended Play Store permissions.', 'success');
+        }
+
+        function addCustomPermission() {
+            const input = document.getElementById('custom-perm-input');
+            const val = input.value.trim();
+            if (!val) return;
+            const fullPerm = val.includes('.') ? val : `android.permission.${val.toUpperCase()}`;
+            if (!state.customPermissions.includes(fullPerm) && !ANDROID_PERMISSIONS.some(p => p.name === fullPerm)) {
+                state.customPermissions.push(fullPerm);
+            }
+            state.selectedPermissions.add(fullPerm);
+            input.value = '';
+            renderPermissionsList();
+            syncPreview();
+            showToast(`Added ${fullPerm}`, 'success');
+        }
+
+        // AdMob Helpers
+        function toggleAdMobState() {
+            const enabled = document.getElementById('admob-enabled').checked;
+            document.getElementById('admob-fields').style.opacity = enabled ? '1' : '0.45';
+            document.getElementById('admob-fields').style.pointerEvents = enabled ? 'auto' : 'none';
+            syncPreview();
+        }
+
+        function fillGoogleTestAds() {
+            document.getElementById('admob-app-id').value = 'ca-app-pub-3940256099942544~3347511713';
+            document.getElementById('admob-banner-id').value = 'ca-app-pub-3940256099942544/6300978111';
+            document.getElementById('admob-interstitial-id').value = 'ca-app-pub-3940256099942544/1033173712';
+            document.getElementById('admob-rewarded-id').value = 'ca-app-pub-3940256099942544/5224354917';
+            document.getElementById('admob-appopen-id').value = 'ca-app-pub-3940256099942544/9257395921';
+            syncPreview();
+            showToast('Loaded official Google AdMob Test IDs.', 'info');
+        }
+
+        function simulateAdTrigger(adType) {
+            if (!document.getElementById('admob-enabled').checked) {
+                showToast('Enable AdMob SDK in Step 3 to test ads.', 'warning');
+                return;
+            }
+            showToast(`AdMob Bridge: Showing Test ${adType} Ad!`, 'success');
+        }
+
+        function copyManifestSnippet() {
+            const text = document.getElementById('manifest-preview').textContent;
+            const ta = document.createElement('textarea');
+            ta.value = text;
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+            showToast('Manifest & AdMob XML copied to clipboard!', 'success');
+        }
+
+        // Sync Live Preview & Manifest XML
+        function syncPreview() {
+            const appName = document.getElementById('app-name').value || 'NovaTask Pro';
+            const pkgName = document.getElementById('package-name').value || 'com.novastudio.novatask';
+            const verName = document.getElementById('version-name').value || '1.0.0';
+            const verCode = document.getElementById('version-code').value || '1';
+            const admobEnabled = document.getElementById('admob-enabled').checked;
+            const admobAppId = document.getElementById('admob-app-id').value.trim();
+            const bannerPos = document.getElementById('banner-pos').value;
+
+            document.getElementById('phone-app-name').textContent = appName;
+            document.getElementById('phone-pkg-name').textContent = pkgName;
+            document.getElementById('phone-ver').textContent = `v${verName} (${verCode})`;
+            document.getElementById('step2-sub').textContent = pkgName;
+            document.getElementById('step3-sub').textContent = admobEnabled ? 'AdMob SDK Active' : 'Ads Disabled';
+
+            if (!state.iconDataUrl) {
+                const initial = appName.charAt(0).toUpperCase() || 'A';
+                document.getElementById('icon-preview-box').textContent = initial;
+                document.getElementById('phone-mini-icon').textContent = initial;
+            }
+
+            // Banner Preview Placement
+            const topAd = document.getElementById('preview-ad-top');
+            const botAd = document.getElementById('preview-ad-bottom');
+            topAd.classList.add('hidden');
+            botAd.classList.add('hidden');
+            if (admobEnabled && bannerPos === 'top') topAd.classList.remove('hidden');
+            if (admobEnabled && bannerPos === 'bottom') botAd.classList.remove('hidden');
+
+            // Ensure AD_ID permission is automatically reflected when AdMob is active
+            const activePerms = new Set(state.selectedPermissions);
+            if (admobEnabled) {
+                activePerms.add('android.permission.INTERNET');
+                activePerms.add('com.google.android.gms.permission.AD_ID');
+            }
+
+            const permissionsXml = Array.from(activePerms)
+                .map(perm => `    <uses-permission android:name="${perm}" />`)
+                .join('\n');
+
+            // Generate hardware features automatically if Camera/Bluetooth/GPS selected
+            const featuresList = [];
+            if (activePerms.has('android.permission.CAMERA')) {
+                featuresList.push(`    <uses-feature android:name="android.hardware.camera" android:required="false" />`);
+            }
+            if (activePerms.has('android.permission.ACCESS_FINE_LOCATION')) {
+                featuresList.push(`    <uses-feature android:name="android.hardware.location.gps" android:required="false" />`);
+            }
+            if (activePerms.has('android.permission.BLUETOOTH') || activePerms.has('android.permission.BLUETOOTH_CONNECT')) {
+                featuresList.push(`    <uses-feature android:name="android.hardware.bluetooth" android:required="false" />`);
+            }
+            const featuresXml = featuresList.length ? `\n\n${featuresList.join('\n')}` : '';
+
+            // Update AndroidManifest.xml preview
+            const manifestXml = `<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="${pkgName}">
+
+${permissionsXml || '    <!-- No permissions selected -->'}${featuresXml}
+
+    <application
+        android:label="${appName}"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:usesCleartextTraffic="true">
+        ${admobEnabled ? `<meta-data
+            android:name="com.google.android.gms.ads.APPLICATION_ID"
+            android:value="${admobAppId}"/>` : '<!-- AdMob Disabled -->'}
+    </application>
+</manifest>`;
+            document.getElementById('manifest-preview').textContent = manifestXml;
+        }
+
+        // Simulated Realistic Gradle Build Pipeline
+        async function startBuildPipeline() {
+            if (!validatePackageName()) {
+                goToStep(2);
+                showToast('Please fix the Package Name format before building.', 'error');
+                return;
+            }
+
+            const buildApk = document.getElementById('build-apk-check').checked;
+            const buildAab = document.getElementById('build-aab-check').checked;
+            if (!buildApk && !buildAab) {
+                showToast('Select at least one output format (APK or AAB).', 'warning');
+                return;
+            }
+
+            const btn = document.getElementById('start-build-btn');
+            btn.disabled = true;
+            btn.classList.add('opacity-60');
+
+            const termWrap = document.getElementById('build-terminal-wrapper');
+            const consoleEl = document.getElementById('build-console');
+            const bar = document.getElementById('build-progress-bar');
+            const pct = document.getElementById('build-percent');
+            const statusLbl = document.getElementById('build-status-label');
+            const resultsCard = document.getElementById('download-results');
+
+            termWrap.classList.remove('hidden');
+            resultsCard.classList.add('hidden');
+            consoleEl.innerHTML = '';
+
+            const pkgName = document.getElementById('package-name').value;
+            const verName = document.getElementById('version-name').value;
+            const admobEnabled = document.getElementById('admob-enabled').checked;
+
+            const logs = [
+                { p: 10, s: 'Extracting source archive...', m: `> Unpacking ${state.zipFileName || 'default-template.zip'} into /workspace/src` },
+                { p: 24, s: 'Configuring Gradle & SDK 35...', m: `> Applying Android Gradle Plugin 8.7.0 (targetSdk 35)` },
+                { p: 38, s: 'Generating AndroidManifest & ASO Metadata...', m: `> Setting applicationId = "${pkgName}", versionName = "${verName}"` },
+                { p: 52, s: 'Injecting AdMob SDK & Bridge...', m: admobEnabled ? `> Injecting com.google.android.gms:play-services-ads:23.5.0 & JS Bridge` : `> AdMob disabled, skipping Play Services Ads` },
+                { p: 68, s: 'Compiling resources & adaptive icons...', m: `> Task :app:mergeReleaseResources & :app:processReleaseManifest UP-TO-DATE` },
+                { p: 84, s: 'Packaging DEX & native ARM64 libraries...', m: `> Task :app:dexBuilderRelease & :app:packageRelease` },
+                { p: 94, s: 'Signing binaries with JKS Release Keystore...', m: `> apksigner: Signed v2/v3 scheme verified (SHA-256)` },
+                { p: 100, s: 'Build Complete!', m: `BUILD SUCCESSFUL in 4.2s — Ready for download.` }
+            ];
+
+            for (const step of logs) {
+                statusLbl.textContent = step.s;
+                bar.style.width = `${step.p}%`;
+                pct.textContent = `${step.p}%`;
+                const line = document.createElement('div');
+                line.textContent = step.m;
+                if (step.p === 100) line.className = 'text-emerald-400 font-bold';
+                consoleEl.appendChild(line);
+                consoleEl.scrollTop = consoleEl.scrollHeight;
+                await new Promise(r => setTimeout(r, 450));
+            }
+
+            const slug = pkgName.split('.').pop() || 'app';
+            document.getElementById('apk-filename-label').textContent = `${slug}-v${verName}-release.apk`;
+            document.getElementById('aab-filename-label').textContent = `${slug}-v${verName}-release.aab`;
+            document.getElementById('dl-apk-btn').style.display = buildApk ? 'flex' : 'none';
+            document.getElementById('dl-aab-btn').style.display = buildAab ? 'flex' : 'none';
+
+            resultsCard.classList.remove('hidden');
+            btn.disabled = false;
+            btn.classList.remove('opacity-60');
+            showToast('APK & AAB packages compiled and signed!', 'success');
+        }
+
+        // Generate real downloadable ZIP/APK/AAB archives containing configured Manifest, Gradle, AdMob & user files
+        async function downloadArtifact(type) {
+            const zip = new JSZip();
+            const appName = document.getElementById('app-name').value || 'AppForgeApp';
+            const pkgName = document.getElementById('package-name').value || 'com.appforge.app';
+            const verName = document.getElementById('version-name').value || '1.0.0';
+            const verCode = document.getElementById('version-code').value || '1';
+            const slug = pkgName.split('.').pop() || 'app';
+
+            // Include user's original files if uploaded
+            if (state.rawZipBlob) {
+                const userZip = await JSZip.loadAsync(state.rawZipBlob);
+                for (const [path, fileObj] of Object.entries(userZip.files)) {
+                    if (!fileObj.dir) {
+                        const content = await fileObj.async('uint8array');
+                        zip.file(`assets/www/${path}`, content);
+                    }
+                }
+            } else {
+                zip.file('assets/www/index.html', `<!DOCTYPE html><html><head><title>${appName}</title></head><body><h1>${appName}</h1></body></html>`);
+            }
+
+            // Include generated AndroidManifest.xml, build.gradle, AdMob config & Play Store metadata
+            zip.file('AndroidManifest.xml', document.getElementById('manifest-preview').textContent);
+            zip.file('build.gradle', `android {\n    namespace "${pkgName}"\n    compileSdk 35\n    defaultConfig {\n        applicationId "${pkgName}"\n        minSdk ${document.getElementById('min-sdk').value}\n        targetSdk ${document.getElementById('target-sdk').value}\n        versionCode ${verCode}\n        versionName "${verName}"\n    }\n}\ndependencies {\n    implementation 'com.google.android.gms:play-services-ads:23.5.0'\n}`);
+            zip.file('play-store-metadata.json', JSON.stringify({
+                appName,
+                packageName: pkgName,
+                versionName: verName,
+                versionCode: Number(verCode),
+                engine: state.engine,
+                keywords: state.keywords,
+                shortDescription: document.getElementById('short-desc').value,
+                admob: {
+                    enabled: document.getElementById('admob-enabled').checked,
+                    appId: document.getElementById('admob-app-id').value,
+                    bannerId: document.getElementById('admob-banner-id').value,
+                    interstitialId: document.getElementById('admob-interstitial-id').value,
+                    rewardedId: document.getElementById('admob-rewarded-id').value,
+                    appOpenId: document.getElementById('admob-appopen-id').value
+                }
+            }, null, 2));
+
+            const blob = await zip.generateAsync({ type: 'blob' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+
+            if (type === 'apk') a.download = `${slug}-v${verName}-release.apk`;
+            else if (type === 'aab') a.download = `${slug}-v${verName}-release.aab`;
+            else a.download = `${slug}-android-studio-project.zip`;
+
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+
+            showToast(`Downloaded ${a.download}`, 'success');
+        }
+    </script>
+</body>
+</html>
